@@ -1,0 +1,55 @@
+name: Build DFPS
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4  # 也更新到 v4
+
+    - name: Setup Android NDK
+      run: |
+        # 下载 Android NDK r25b（与原脚本匹配）
+        wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
+        unzip -q android-ndk-r25b-linux.zip
+        echo "ANDROID_NDK=$(pwd)/android-ndk-r25b" >> $GITHUB_ENV
+        echo "$(pwd)/android-ndk-r25b/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake make zip
+
+    - name: Build DFPS (Release)
+      run: |
+        chmod +x build.sh
+        # 只构建和打包，不安装（因为GitHub Actions没有连接设备）
+        ./build.sh Release "make pack"
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4  # 改为 v4
+      with:
+        name: dfps-magisk-module
+        path: |
+          build/package/dfps-magisk.zip
+          build/arm64/runnable/dfps
+        if-no-files-found: error
+
+    - name: Verify build
+      run: |
+        echo "构建完成！文件列表："
+        ls -la build/package/
+        echo ""
+        echo "检查二进制文件："
+        file build/arm64/runnable/dfps
+        echo ""
+        echo "模块包大小："
+        ls -lh build/package/dfps-magisk.zip
