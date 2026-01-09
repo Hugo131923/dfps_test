@@ -1,17 +1,142 @@
-name: Build DFPS
-on: [push, workflow_dispatch]
+name: Build DFPS with Debug
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    
     steps:
-      - uses: actions/checkout@v4
-      - run: |
-          wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
-          unzip -q android-ndk-r25b-linux.zip
-          export ANDROID_NDK=$(pwd)/android-ndk-r25b
-          chmod +x build.sh
-          ./build.sh Release "make pack"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dfps-module
-          path: build/package/dfps-magisk.zip
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Debug - Show repository structure
+      run: |
+        echo "=== 仓库结构 ==="
+        ls -la
+        echo ""
+        echo "=== build.sh 内容 ==="
+        cat build.sh
+        echo ""
+        echo "=== 修改的 dynamic_fps.cpp 片段 ==="
+        if [ -f modules/dynamic_fps.cpp ]; then
+          echo "文件存在，显示第300-310行："
+          sed -n '300,310p' modules/dynamic_fps.cpp
+        else
+          echo "modules/dynamic_fps.cpp 不存在！"
+        fi
+
+    - name: Setup Android NDK
+      run: |
+        echo "开始下载 Android NDK r25b..."
+        wget https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
+        echo "下载完成，开始解压..."
+        unzip android-ndk-r25b-linux.zip
+        echo "解压完成"
+        
+        # 检查 NDK 目录结构
+        echo "=== NDK 目录结构 ==="
+        ls -la android-ndk-r25b/toolchains/llvm/prebuilt/
+        
+        # 设置环境变量
+        echo "ANDROID_NDK=$(pwd)/android-ndk-r25b" >> $GITHUB_ENV
+        echo "NDK_PATH=$(pwd)/android-ndk-r25b" >> $GITHUB_ENV
+        
+        # 验证工具链是否存在
+        echo "=== 检查工具链 ==="
+        if [ -f "android-ndk-r25b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android23-clang" ]; then
+          echo "工具链存在"
+        else
+          echo "工具链不存在！"
+          find android-ndk-r25b -name "*clang*" | head -10
+        fi
+
+    - name: Install dependencies
+      run: |
+        echo "安装构建依赖..."
+        sudo apt-get update
+        sudo apt-get install -y cmake make zip gcc g++ ninja-build
+        echo "依赖安装完成"
+        echo "cmake 版本："
+        cmake --version
+        echo "make 版本："
+        make --version
+
+    - name: Test environment
+      run: |
+        echo "=== 环境变量测试 ==="
+        echo "ANDROID_NDK: $ANDROID_NDK"
+        echo "当前目录：$(pwd)"
+        echo "PATH: $PATH"
+        
+        # 检查关键文件是否存在
+        echo ""
+        echo "=== 关键文件检查 ==="
+        ls -la build.sh
+        echo "文件权限："
+        stat build.sh
+        
+        # 尝试直接运行 CMake 命令测试
+        echo ""
+        echo "=== 简单 CMake 测试 ==="
+        mkdir -p test_build && cd test_build
+        echo "project(Test)" > CMakeLists.txt
+        cmake .. || echo "CMake 测试失败"
+        cd ..
+
+    - name: Build step by step
+      run: |
+        echo "=== 开始构建 ==="
+        chmod +x build.sh
+        echo "build.sh 已设置为可执行"
+        
+        # 先尝试只构建（不打包）
+        echo "=== 第一步：只构建二进制 (make) ==="
+        ./build.sh Release "make" || {
+          echo "构建失败！退出码：$?"
+          echo "=== 错误信息 ==="
+          # 检查构建目录是否存在
+          ls -la build/ 2>/dev/null || echo "build/ 目录不存在"
+          # 如果有错误日志
+          find . -name "*.log" -o -name "CMake*.txt" | head -5
+          exit 1
+        }
+        
+        echo "=== 构建成功，检查产物 ==="
+        find . -name "dfps" -type f
+        ls -la build/ 2>/dev/null || echo "build/ 目录不存在"
+        
+        # 如果上一步成功，再尝试打包
+        echo "=== 第二步：打包 (pack) ==="
+        ./build.sh Release "pack" || {
+          echo "打包失败！退出码：$?"
+          echo "=== 错误信息 ==="
+          ls -la build/package/ 2>/dev/null || echo "package/ 目录不存在"
+          exit 1
+        }
+        
+        echo "=== 构建和打包都成功 ==="
+
+    - name: Upload artifacts on success
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: dfps-success-build
+        path: |
+          build/
+          android-ndk-r25b/
+        retention-days: 1
+
+    - name: Upload logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: dfps-failure-logs
+        path: |
+          build/
+          **/*.log
+          **/CMake*.txt
+        retention-days: 7
