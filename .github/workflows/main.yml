@@ -1,55 +1,58 @@
-name: Build DFPS
+name: Build and Package DFPS
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, master ]
-  workflow_dispatch:  # 允许手动触发
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  NDK_VERSION: r25b
+  NDK_URL: https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
 
 jobs:
   build:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4  # 也更新到 v4
-
-    - name: Setup Android NDK
+    - uses: actions/checkout@v4
+    
+    - name: Cache NDK
+      uses: actions/cache@v3
+      id: ndk-cache
+      with:
+        path: android-ndk-${{ env.NDK_VERSION }}
+        key: ${{ runner.os }}-ndk-${{ env.NDK_VERSION }}
+    
+    - name: Download NDK
+      if: steps.ndk-cache.outputs.cache-hit != 'true'
       run: |
-        # 下载 Android NDK r25b（与原脚本匹配）
-        wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
-        unzip -q android-ndk-r25b-linux.zip
-        echo "ANDROID_NDK=$(pwd)/android-ndk-r25b" >> $GITHUB_ENV
-        echo "$(pwd)/android-ndk-r25b/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
-
-    - name: Install dependencies
+        wget -q ${{ env.NDK_URL }}
+        unzip -q android-ndk-${{ env.NDK_VERSION }}-linux.zip
+        rm android-ndk-${{ env.NDK_VERSION }}-linux.zip
+    
+    - name: Setup environment
       run: |
-        sudo apt-get update
-        sudo apt-get install -y cmake make zip
-
-    - name: Build DFPS (Release)
+        echo "ANDROID_NDK=$(pwd)/android-ndk-${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+        echo "$(pwd)/android-ndk-${{ env.NDK_VERSION }}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+    
+    - name: Build and package
       run: |
         chmod +x build.sh
-        # 只构建和打包，不安装（因为GitHub Actions没有连接设备）
         ./build.sh Release "make pack"
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4  # 改为 v4
+        echo "Build completed successfully!"
+    
+    - name: Upload module package
+      uses: actions/upload-artifact@v4
       with:
-        name: dfps-magisk-module
-        path: |
-          build/package/dfps-magisk.zip
-          build/arm64/runnable/dfps
-        if-no-files-found: error
-
-    - name: Verify build
-      run: |
-        echo "构建完成！文件列表："
-        ls -la build/package/
-        echo ""
-        echo "检查二进制文件："
-        file build/arm64/runnable/dfps
-        echo ""
-        echo "模块包大小："
-        ls -lh build/package/dfps-magisk.zip
+        name: dfps-module
+        path: build/package/dfps-magisk.zip
+        retention-days: 7
+    
+    - name: Upload binary only
+      uses: actions/upload-artifact@v4
+      with:
+        name: dfps-binary
+        path: build/arm64/runnable/dfps
+        retention-days: 7
