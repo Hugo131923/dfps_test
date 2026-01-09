@@ -1,0 +1,30 @@
+name: Test Build Environment
+
+on: workflow_dispatch
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Just download NDK and check
+      run: |
+        echo "下载 NDK..."
+        wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
+        unzip -q android-ndk-r25b-linux.zip
+        
+        echo "检查 NDK 结构..."
+        ls -la android-ndk-r25b/toolchains/llvm/prebuilt/linux-x86_64/bin/ | head -20
+        
+        echo "检查编译工具..."
+        ./android-ndk-r25b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android23-clang --version
+        
+    - name: Check build.sh syntax
+      run: |
+        echo "检查 build.sh 语法..."
+        bash -n build.sh && echo "语法检查通过"
+        echo ""
+        echo "显示 build.sh 头20行："
+        head -20 build.sh
