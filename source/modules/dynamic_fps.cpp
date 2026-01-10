@@ -48,7 +48,6 @@ DynamicFps::DynamicFps(const std::string &configPath, const std::string &notifyP
       touchSlackMs_(DEFAULT_TOUCH_SLACK_MS),
       gestureSlackMs_(DEFAULT_GESTURE_SLACK_MS),
       enableMinBrightness_(DEFAULT_ENABLE_MIN_BRIGHTNESS),
-      lowBrightnessFixedHz_(60),  // 添加这一行！默认值60
       hasUniversial_(false),
       hasOffscreen_(false),
       hasLowBrightnessRule_(false),  // 新增
@@ -171,14 +170,6 @@ void DynamicFps::SetTunable(const std::string &tunable, const std::string &value
         touchSlackMs_ = std::max(MIN_TOUCH_SLACK_MS, std::stoi(value));
     } else if (tunable == "enableMinBrightness") {
         enableMinBrightness_ = std::min(MAX_ENABLE_MIN_BRIGHTNESS, std::stoi(value));
-    } else if (tunable == "lowBrightnessFixedHz") {  // ← 添加这一行
-        // 向后兼容：将旧参数转换为低亮度规则
-        int fixedHz = std::stoi(value);
-        lowBrightnessRule_.idle = fixedHz;
-        lowBrightnessRule_.active = fixedHz;
-        hasLowBrightnessRule_ = true;
-        SPDLOG_INFO("Converted lowBrightnessFixedHz={} to low brightness rule {}/{}", 
-                   fixedHz, fixedHz, fixedHz);
     } else {
         SPDLOG_WARN("Unknown tunable '{}' in the config file", tunable);
     }
@@ -314,72 +305,30 @@ void DynamicFps::OnOffscreen(const void *data) {
 
 void DynamicFps::SwitchRefreshRate(bool force) {
     forceSwitch_ = force;
-    
-    HwSetWork(hw_, [this]() {
-        // 更新亮度状态
-        if (brightnessTimer_.ElapsedS() > BRIGHTNESS_SAMPLE_INTERVAL_S) {
-            brightnessTimer_.Reset();
-            auto brightness = GetScreenBrightness();
-            bool oldLowBrightness = lowBrightness_;
-            lowBrightness_ = brightness < enableMinBrightness_;
-            
-            if (oldLowBrightness != lowBrightness_) {
-                SPDLOG_INFO("亮度状态变化: {} -> {} (亮度值={})",
-                           oldLowBrightness ? "低亮度" : "正常亮度",
-                           lowBrightness_ ? "低亮度" : "正常亮度",
-                           brightness);
+    if (active_) {
+        HwSetWork(hw_, [this]() {
+            auto rule = GetCurrentRule();
+            // 添加亮度检测
+            if (brightnessTimer_.ElapsedS() > BRIGHTNESS_SAMPLE_INTERVAL_S) {
+                brightnessTimer_.Reset();
+                auto brightness = GetScreenBrightness();
+                lowBrightness_ = brightness < enableMinBrightness_;
             }
-        }
-        
-        // 获取当前适用的规则
-        auto rule = GetCurrentRule();
-        int targetHz = active_ ? rule.active : rule.idle;
-        
-        // 添加详细的调试日志
-        const auto &pkgName = overridedApp_.empty() ? curApp_ : overridedApp_;
-        
-        // 判断规则类型
-        std::string ruleType;
-        std::string brightnessMode = lowBrightness_ ? "低亮度" : "正常亮度";
-        
-        if (pkgName == OFFSCREEN_PKG_NAME) {
-            ruleType = "锁屏规则";
-        } else if (lowBrightness_) {
-            // 低亮度时，需要判断是使用了低亮度规则还是应用规则
-            auto appIt = rules_.find(pkgName);
-            if (appIt != rules_.end()) {
-                // 有应用特定规则，应用规则优先级高
-                ruleType = "应用规则(低亮度覆盖)";
-            } else {
-                // 使用低亮度规则
-                ruleType = "低亮度规则";
-                
-                // 如果是通过 lowBrightnessFixedHz 转换的，特别标注
-                // 检查低亮度规则是否为固定值（idle == active）
-                if (lowBrightnessRule_.idle == lowBrightnessRule_.active) {
-                    ruleType = "低亮度固定规则(由lowBrightnessFixedHz转换)";
-                }
+            // 现在直接使用 GetCurrentRule() 返回的规则
+            SwitchRefreshRate(rule.active);
+        });
+    } else {
+        HwSetWork(hw_, [this]() {
+            auto rule = GetCurrentRule();
+            if (brightnessTimer_.ElapsedS() > BRIGHTNESS_SAMPLE_INTERVAL_S) {
+                brightnessTimer_.Reset();
+                auto brightness = GetScreenBrightness();
+                lowBrightness_ = brightness < enableMinBrightness_;
             }
-        } else {
-            // 正常亮度
-            auto appIt = rules_.find(pkgName);
-            if (appIt != rules_.end()) {
-                ruleType = "应用规则";
-            } else {
-                ruleType = "默认规则";
-            }
-        }
-        
-        SPDLOG_INFO("[{}] {}Hz (应用={}, {}状态)", 
-                   ruleType, targetHz, pkgName, active_ ? "活动" : "空闲");
-        
-        // 如果还在使用 lowBrightnessFixedHz_ 模式（临时变量），也记录一下
-        if (lowBrightness_ && lowBrightnessFixedHz_ != 0) {
-            SPDLOG_DEBUG("lowBrightnessFixedHz旧参数值: {}", lowBrightnessFixedHz_);
-        }
-        
-        SwitchRefreshRate(targetHz);
-    });
+            // 现在直接使用 GetCurrentRule() 返回的规则
+            SwitchRefreshRate(rule.idle);
+        });
+    }
 }
 
 void DynamicFps::SwitchRefreshRate(int hz) {
