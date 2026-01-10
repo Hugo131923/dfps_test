@@ -324,22 +324,16 @@ void DynamicFps::SwitchRefreshRate(int hz) {
     auto force = forceSwitch_;
     forceSwitch_ = false;
     
-    // 使用静态变量跟踪lowBrightnessFixedHz的变化
-    static int lastLowBrightnessFixedHz = lowBrightnessFixedHz_;
-    static bool configChanged = false;
-    
-    if (lastLowBrightnessFixedHz != lowBrightnessFixedHz_) {
-        SPDLOG_DEBUG("lowBrightnessFixedHz changed from {} to {}", 
-                   lastLowBrightnessFixedHz, lowBrightnessFixedHz_);
-        lastLowBrightnessFixedHz = lowBrightnessFixedHz_;
-        configChanged = true;
-    }
-    
-    if (configChanged) {
-        SPDLOG_DEBUG("Config changed, forcing switch");
-        configChanged = false;
-        force = true;
-        curHz_ = -1;  // 清除缓存，确保切换执行
+    // 在低亮度模式下，总是检查lowBrightnessFixedHz是否变化
+    if (lowBrightness_) {
+        static int lastFixedHz = lowBrightnessFixedHz_;
+        if (lastFixedHz != lowBrightnessFixedHz_) {
+            SPDLOG_DEBUG("lowBrightnessFixedHz changed in low brightness mode: {} -> {}", 
+                       lastFixedHz, lowBrightnessFixedHz_);
+            lastFixedHz = lowBrightnessFixedHz_;
+            force = true;
+            curHz_ = -1;  // 清除缓存
+        }
     }
     
     SPDLOG_DEBUG("switch {} (force={})", hz, force);
