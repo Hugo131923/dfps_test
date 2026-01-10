@@ -159,6 +159,7 @@ void DynamicFps::SetTunable(const std::string &tunable, const std::string &value
         enableMinBrightness_ = std::min(MAX_ENABLE_MIN_BRIGHTNESS, std::stoi(value));
     } else if (tunable == "lowBrightnessFixedHz") {  // ← 添加这一行
         lowBrightnessFixedHz_ = std::stoi(value);     // ← 添加这一行
+        curHz_ = INT32_MAX;  // 只添加这一行
     } else {
         SPDLOG_WARN("Unknown tunable '{}' in the config file", tunable);
     }
