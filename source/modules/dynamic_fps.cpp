@@ -48,6 +48,7 @@ DynamicFps::DynamicFps(const std::string &configPath, const std::string &notifyP
       gestureSlackMs_(DEFAULT_GESTURE_SLACK_MS),
       enableMinBrightness_(DEFAULT_ENABLE_MIN_BRIGHTNESS),
       lowBrightnessFixedHz_(60),  // 添加这一行！默认值60
+      lowBrightnessConfigChanged_(false),  // 添加这一行
       hasUniversial_(false),
       hasOffscreen_(false),
       notifyPath_(notifyPath),
@@ -161,14 +162,11 @@ void DynamicFps::SetTunable(const std::string &tunable, const std::string &value
         int newHz = std::stoi(value);
         if (newHz != lowBrightnessFixedHz_) {
             lowBrightnessFixedHz_ = newHz;
-            // 清除缓存，确保下次切换不会被跳过
-            curHz_ = -1;  // 使用一个不可能的值
+            lowBrightnessConfigChanged_ = true;  // 设置变化标志
+            SPDLOG_INFO("lowBrightnessFixedHz changed to {}", newHz);
             
-            SPDLOG_DEBUG("lowBrightnessFixedHz changed to {}", newHz);
-            
-            // 如果当前处于低亮度模式，立即重新计算刷新率
+            // 如果当前处于低亮度模式，立即应用新设置
             if (lowBrightness_) {
-                // 强制刷新率重新计算
                 forceSwitch_ = true;
                 SwitchRefreshRate(true);
             }
@@ -335,7 +333,17 @@ void DynamicFps::SwitchRefreshRate(bool force) {
 void DynamicFps::SwitchRefreshRate(int hz) {
     auto force = forceSwitch_;
     forceSwitch_ = false;
-    SPDLOG_DEBUG("switch {}", hz);
+    
+    // 检查配置是否变化
+    if (lowBrightnessConfigChanged_) {
+        SPDLOG_DEBUG("Config change detected, forcing switch");
+        lowBrightnessConfigChanged_ = false;
+        force = true;
+        curHz_ = -1;  // 清除缓存
+    }
+    
+    SPDLOG_DEBUG("switch {} (force={})", hz, force);
+    
     if (force == false && hz == curHz_) {
         return;
     }
